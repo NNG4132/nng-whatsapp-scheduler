@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>NNG WhatsApp Scheduler</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+  <style>
+    body { font-family: sans-serif; }
+    .unsent { background-color: #fee2e2; }
+    
+    /* گرڈ کا اسٹائل */
+    .grid-container {
+      width: 100%;
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      overflow-x: auto; /* اسکرول ایبل بنانے کے لیے */
+    }
+    
+    .grid-header {
+      display: grid;
+      grid-template-columns: 0.5fr 1fr 1fr 1fr 1fr 0.7fr 0.8fr 0.8fr 0.8fr 0.8fr 1fr;
+      background-color: #e5e7eb;
+      font-weight: bold;
+      text-align: left;
+      min-width: 1000px; /* کم سے کم چوڑائی */
+    }
+    
+    .grid-row {
+      display: grid;
+      grid-template-columns: 0.5fr 1fr 1fr 1fr 1fr 0.7fr 0.8fr 0.8fr 0.8fr 0.8fr 1fr;
+      border-bottom: 1px solid #e5e7eb;
+      min-width: 1000px; /* کم سے کم چوڑائی */
+    }
+    
+    .grid-row.unsent {
+      background-color: #fee2e2;
+    }
+    
+    .grid-cell {
+      padding: 0.5rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      position: relative;
+    }
+    
+    /* سادہ ہوور افیکٹ - صرف ہوور شدہ سیل کے لیے */
+    .grid-cell:hover {
+      white-space: normal;
+      overflow: visible;
+      background-color: #f0f0f0;
+      z-index: 10;
+    }
+    
+    .grid-body .grid-row:nth-child(even) {
+      background-color: #f9fafb;
+    }
+    
+    .grid-body .grid-row:hover {
+      background-color: #f3f4f6;
+    }
+    
+    /* سرچ ہائی لائٹ اسٹائل */
+    .highlight {
+      background-color: #ffff00;
+      font-weight: bold;
+    }
+    
+    /* سرچ بار اسٹائل */
+    .search-container {
+      margin-bottom: 16px;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 p-6">
+  <div class="max-w-5xl mx-auto bg-white rounded-lg shadow p-6">
+    <div class="flex justify-between items-center mb-4">
+      <h1 class="text-2xl font-bold text-green-700">NNG WhatsApp Scheduler</h1>
+      <div>
+        <button id="signInBtn" class="bg-blue-600 text-white px-4 py-1 rounded">Sign In with Google</button>
+        <button id="signOutBtn" class="hidden bg-red-500 text-white px-4 py-1 rounded">Sign Out</button>
+      </div>
+    </div>
+
+    <div id="appContent" class="hidden">
+      <input type="text" id="name" placeholder="Customer Name" class="border p-2 w-full mb-2 rounded">
+      <input type="text" id="number" placeholder="Phone (+923XXXXXXXXX)" class="border p-2 w-full mb-2 rounded">
+      <input type="text" id="balance" placeholder="Balance" class="border p-2 w-full mb-2 rounded">
+
+      <select id="bank" class="border p-2 w-full mb-2 rounded">
+        <option value="">Select Bank</option>
+        <option value="Easypaisa\nA/C Title: Muhammad Arslan\nA/C # 03239652506">Easypaisa</option>
+        <option value="Jazzcash\nA/C Title: Muhammad Arslan\nA/C # 03239652506">Jazzcash - Arslan</option>
+        <option value="Jazzcash\nA/C Title: Muhammad Aslam\nA/C # 03216614388">Jazzcash - Aslam</option>
+        <option value="Alfalah Bank\nA/C # 0108 1008147236\nA/C Title: Muhammad Arslan\n03239652506">Alfalah Bank</option>
+        <option value="Meezan Bank\nA/C # 0422 0103046557\nA/C Title: Muhammad Arslan\n03239652506">Meezan Bank</option>
+        <option value="Alfalah Bank\nA/C # 55035000225377\nA/C Title: Muhammad Aslam\n03216614388">Alfalah Bank - Aslam</option>
+      </select>
+
+      <select id="messageType" class="border p-2 w-full mb-2 rounded">
+        <option value="1">Message 1 (Salesman will collect)</option>
+        <option value="2">Message 2 (Transfer + Screenshot)</option>
+      </select>
+
+      <input type="date" id="date" class="border p-2 w-full mb-2 rounded">
+      <input type="time" id="time" class="border p-2 w-full mb-4 rounded">
+      <select id="repeat" class="border p-2 w-full mb-4 rounded">
+          <option value="none">Repeat: None</option>
+          <option value="daily">Repeat: Daily</option>
+          <option value="weekly">Repeat: Weekly</option>
+          <option value="monthly">Repeat: Monthly</option>
+      </select>
+      <button onclick="saveCustomer()" id="saveBtn" class="bg-green-600 text-white px-4 py-2 rounded w-full">Save</button>
+
+      <h2 class="text-xl font-semibold mt-6 mb-2">Customer List</h2>
+      
+      <!-- سرچ بار -->
+      <div class="search-container">
+        <input type="text" id="searchInput" placeholder="Search by name or number..." class="border p-2 w-full mb-2 rounded">
+      </div>
+      
+      <div class="grid-container">
+        <div class="grid-header">
+          <div class="grid-cell">Sr #</div>
+          <div class="grid-cell">Name</div>
+          <div class="grid-cell">Number</div>
+          <div class="grid-cell">Balance</div>
+          <div class="grid-cell">Bank</div>
+          <div class="grid-cell">Message</div>
+          <div class="grid-cell">Date</div>
+          <div class="grid-cell">Time</div>
+          <div class="grid-cell">Repeat</div>
+          <div class="grid-cell">Status</div>
+          <div class="grid-cell">Actions</div>
+        </div>
+        <div id="gridBody" class="grid-body"></div>
+      </div>
+    </div>
+<script>
+  const firebaseConfig = {
+  apiKey: "AIzaSyDnt15IPuDdZ_rlLyX8RA2UpgXaPgs01gM",
+  authDomain: "nng-balance-app.firebaseapp.com",
+  projectId: "nng-balance-app",
+  storageBucket: "nng-balance-app.appspot.com",
+  messagingSenderId: "213453059518",
+  appId: "1:213453059518:web:88249d9b1264f551e8f5ef"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+
+let userId = "";
+const signInBtn = document.getElementById("signInBtn");
+const signOutBtn = document.getElementById("signOutBtn");
+const appContent = document.getElementById("appContent");
+
+signInBtn.onclick = () => {
+  const provider = new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(provider).then(res => {
+    userId = res.user.uid;
+    signInBtn.classList.add("hidden");
+    signOutBtn.classList.remove("hidden");
+    appContent.classList.remove("hidden");
+    loadCustomers();
+  });
+};
+
+signOutBtn.onclick = () => {
+  auth.signOut().then(() => {
+    userId = "";
+    signOutBtn.classList.add("hidden");
+    signInBtn.classList.remove("hidden");
+    appContent.classList.add("hidden");
+  });
+};
+
+// سرچ فنکشنیلٹی
+document.getElementById('searchInput').addEventListener('keyup', function() {
+  loadCustomers(this.value);
+});
+
+window.addEventListener('load', () => {
+  auth.onAuthStateChanged(user => {
+    if (user) {
+      userId = user.uid;
+      signInBtn.classList.add("hidden");
+      signOutBtn.classList.remove("hidden");
+      appContent.classList.remove("hidden");
+      loadCustomers();
+      setCurrentDateTime();
+    } else {
+      userId = "";
+      signOutBtn.classList.add("hidden");
+      signInBtn.classList.remove("hidden");
+      appContent.classList.add("hidden");
+    }
+  });
+  
+  setCurrentDateTime();
+});
+
+function saveCustomer() {
+  const name = document.getElementById("name").value;
+  let number = document.getElementById("number").value;
+  const balance = document.getElementById("balance").value;
+  const bank = document.getElementById("bank").value;
+  const message = document.getElementById("messageType").value;
+  const date = document.getElementById("date").value;
+  const time = document.getElementById("time").value;
+  const repeat = document.getElementById("repeat").value;
+  
+  if (number.startsWith("0")) number = "92" + number.slice(1);
+  
+  db.collection("customers").add({ 
+    userId, 
+    name, 
+    number, 
+    balance, 
+    bank, 
+    message, 
+    date, 
+    time, 
+    repeat,
+    sent: false, 
+    created: new Date() 
+  }).then(() => {
+    clearForm();
+    loadCustomers();
+  });
+}
+
+function clearForm() {
+  document.getElementById("name").value = "";
+  document.getElementById("number").value = "";
+  document.getElementById("balance").value = "";
+  document.getElementById("bank").value = "";
+  document.getElementById("messageType").value = "1";
+  document.getElementById("repeat").value = "none";
+  
+  setCurrentDateTime();
+}
+
+function formatMessage(c) {
+  const formattedBank = c.bank.replace(/\\n/g, '\n');
+  const messageText = c.message === "2"
+    ? `براہ مہربانی بیلنس کے حساب سے رقم کی ادائیگی ہمارے اِس اکاؤنٹ میں ٹرانسفر کر کے اسکرین شاٹ بھیج دیں۔ شکریہ:\n\n--------------------\n${formattedBank}\n--------------------\n\nگلی نمبر 4، منٹگمری بازار، فیصل آباد۔`
+    : `براہ مہربانی بیلنس کے حساب سے رقم کی ادائیگی تیار رکھیں تاکہ ہمارا سیل مین وقت پر رقم کی وصولی کر سکے۔ شکریہ\n\nگلی نمبر 4، منٹگمری بازار، فیصل آباد۔`;
+  return `السلام علیکم!\n\n🧾 آپ کا بیلنس: *${c.balance}*\n\nنیو نوید گارمنٹس فیصل آباد (ہول سیل ڈیلر) کی طرف سے یہ آپ کا بیلنس ہے۔\n\n${messageText}`;
+}
+
+// نئی تاریخ کی گننا کرنے کا فنکشن
+function calculateNextDate(currentDate, repeatType) {
+  const date = new Date(currentDate);
+  
+  switch(repeatType) {
+    case 'daily':
+      date.setDate(date.getDate() + 1);
+      break;
+    case 'weekly':
+      date.setDate(date.getDate() + 7);
+      break;
+    case 'monthly':
+      date.setMonth(date.getMonth() + 1);
+      break;
+    default:
+      return null; // اگر ریپیٹ نہیں ہے
+  }
+  
+  return date;
+}
+
+// میسج بھیجنے کے بعد ریپیٹ میسج کی تیاری
+function handleMessageSent(docId, customerData) {
+  // چیک کریں کہ آیا repeat سیٹ ہے
+  if (customerData.repeat && customerData.repeat !== 'none') {
+    const nextDate = calculateNextDate(`${customerData.date}T${customerData.time}`, customerData.repeat);
+    
+    if (nextDate) {
+      const nextDateStr = nextDate.toISOString().split('T')[0];
+      const nextTimeStr = customerData.time;
+      
+      // نئی تاریخ کے ساتھ موجودہ ریکارڈ کو اپڈیٹ کریں، ناکہ نیا بنائیں
+      db.collection("customers").doc(docId).update({
+        date: nextDateStr,
+        time: nextTimeStr,
+        sent: false // سٹیٹس دوبارہ پینڈنگ میں رکھیں
+      }).then(() => {
+        // UI اپڈیٹ کریں
+        loadCustomers(document.getElementById("searchInput").value);
+      });
+    }
+  } else {
+    // اگر repeat نہیں ہے تو صرف sent کو true کریں
+    db.collection("customers").doc(docId).update({ sent: true })
+      .then(() => {
+        // UI اپڈیٹ کریں
+        loadCustomers(document.getElementById("searchInput").value);
+      });
+  }
+}
+
+// ریسینڈ فنکشن
+function resendMessage(id) {
+  db.collection("customers").doc(id).get().then(doc => {
+    if (doc.exists) {
+      const customerData = doc.data();
+      const fullMsg = formatMessage(customerData);
+      const waUrl = `https://wa.me/${customerData.number}?text=${encodeURIComponent(fullMsg)}`;
+      
+      // واٹس ایپ میسج کھولیں
+      window.open(waUrl, "_blank");
+      
+      // میسج سینڈ ہونے کے بعد ہینڈل کریں
+      handleMessageSent(id, customerData);
+    }
+  });
+}
+
+// ہائی لائٹ کرنے کا فنکشن
+function highlightText(text, searchTerm) {
+  if (!searchTerm) return text;
+  
+  const regex = new RegExp(searchTerm, 'gi');
+  return text.replace(regex, match => `<span class="highlight">${match}</span>`);
+}
+
+function loadCustomers(searchTerm = '') {
+  const gridBody = document.getElementById("gridBody");
+  gridBody.innerHTML = "";
+  
+  const uniqueCustomers = {};
+  let serialNumber = 1;
+  
+  db.collection("customers").where("userId", "==", userId).get().then(snapshot => {
+    const now = new Date();
+    let filteredCustomers = [];
+    
+    snapshot.forEach(doc => {
+      const c = doc.data();
+      c.id = doc.id;
+      
+      // اگر سرچ ٹرم موجود ہے تو فلٹر کریں
+      const searchTermLower = searchTerm.toLowerCase();
+      if (searchTerm && !c.name.toLowerCase().includes(searchTermLower) && 
+          !c.number.toLowerCase().includes(searchTermLower)) {
+        return; // اگر سرچ میچ نہیں ہوتا تو اس کسٹمر کو چھوڑ دیں
+      }
+      
+      if (!uniqueCustomers[c.id]) {
+        uniqueCustomers[c.id] = true;
+        filteredCustomers.push(c);
+      }
+    });
+    
+    // فلٹر شدہ کسٹمرز کو دکھائیں
+    filteredCustomers.forEach(c => {
+      const fullMsg = formatMessage(c);
+      const waUrl = `https://wa.me/${c.number}?text=${encodeURIComponent(fullMsg)}`;
+      const isPast = new Date(`${c.date}T${c.time}`) < new Date();
+      let actions = "";
+      const messageTime = new Date(`${c.date}T${c.time}`);
+      const timePassed = now > messageTime;
+
+      if (!c.sent && timePassed) {
+        actions += `<button onclick='resendMessage("${c.id}")' class='text-yellow-600 underline'>Resend</button>`;
+      }
+      actions += `<button onclick='editCustomer("${c.id}", ${JSON.stringify(c).replace(/"/g, '&quot;')})' class='text-blue-600 ml-2'>Update</button>`;
+      actions += `<button onclick='db.collection("customers").doc("${c.id}").delete().then(() => loadCustomers(document.getElementById("searchInput").value))' class='text-red-600 ml-2'>Delete</button>`;
+
+      const rowClass = !c.sent && new Date(`${c.date}T${c.time}`) < new Date() ? "grid-row unsent" : "grid-row";
+      
+      // سرچ ٹرم اگر موجود ہے تو ہائی لائٹ کریں
+      const highlightedName = searchTerm ? highlightText(c.name, searchTerm) : c.name;
+      const highlightedNumber = searchTerm ? highlightText(c.number, searchTerm) : c.number;
+      
+      gridBody.innerHTML += `
+        <div class="${rowClass}">
+          <div class="grid-cell">${serialNumber}</div>
+          <div class="grid-cell">${highlightedName}</div>
+          <div class="grid-cell">${highlightedNumber}</div>
+          <div class="grid-cell">${c.balance}</div>
+          <div class="grid-cell">${c.bank.split("\\n")[0]}</div>
+          <div class="grid-cell">${c.message}</div>
+          <div class="grid-cell">${c.date}</div>
+          <div class="grid-cell">${c.time}</div>
+          <div class="grid-cell">${c.repeat || 'none'}</div>
+          <div class="grid-cell">${c.sent ? 'Sent' : 'Pending'}</div>
+          <div class="grid-cell">${actions}</div>
+        </div>
+      `;
+      
+      serialNumber++;
+    });
+    
+    // اگر کوئی کسٹمر نہیں ملا تو یہ دکھائیں
+    if (serialNumber === 1) {
+      gridBody.innerHTML = `<div class="grid-row"><div class="grid-cell" style="grid-column: span 11; text-align: center;">No customers found</div></div>`;
+    }
+  });
+}
+
+function editCustomer(id, data) {
+  document.getElementById("name").value = data.name;
+  document.getElementById("number").value = data.number;
+  document.getElementById("balance").value = data.balance;
+  document.getElementById("bank").value = data.bank;
+  document.getElementById("messageType").value = data.message;
+  document.getElementById("date").value = data.date;
+  document.getElementById("time").value = data.time;
+  document.getElementById("repeat").value = data.repeat || 'none';
+  
+  const originalDate = data.date;
+  const originalTime = data.time;
+  
+  const saveBtn = document.getElementById("saveBtn");
+  saveBtn.textContent = "Update";
+  saveBtn.onclick = () => {
+    const newDate = document.getElementById("date").value;
+    const newTime = document.getElementById("time").value;
+    
+    const dateTimeChanged = (originalDate !== newDate || originalTime !== newTime);
+    
+    const newDateTime = new Date(`${newDate}T${newTime}`);
+    const now = new Date();
+    const isFutureTime = newDateTime > now;
+    
+    const updateData = {
+      name: document.getElementById("name").value,
+      number: document.getElementById("number").value,
+      balance: document.getElementById("balance").value,
+      bank: document.getElementById("bank").value,
+      message: document.getElementById("messageType").value,
+      date: newDate,
+      time: newTime,
+      repeat: document.getElementById("repeat").value
+    };
+    
+    if (dateTimeChanged && isFutureTime) {
+      updateData.sent = false;
+    }
+    
+    db.collection("customers").doc(id).update(updateData).then(() => {
+      saveBtn.textContent = "Save";
+      saveBtn.setAttribute("onclick", "saveCustomer()");
+      clearForm();
+      loadCustomers(document.getElementById("searchInput").value);
+    });
+  };
+}
+
+setInterval(() => {
+  const now = new Date();
+  const currentDate = now.toISOString().split("T")[0];
+  const currentTime = now.toTimeString().slice(0, 5);
+  db.collection("customers")
+    .where("userId", "==", userId)
+    .where("sent", "==", false)
+    .get().then(snapshot => {
+      snapshot.forEach(doc => {
+        const customerData = doc.data();
+        const docId = doc.id;
+        
+        if (customerData.date === currentDate && customerData.time === currentTime) {
+          const fullMsg = formatMessage(customerData);
+          const waUrl = `https://wa.me/${customerData.number}?text=${encodeURIComponent(fullMsg)}`;
+          window.open(waUrl, "_blank");
+          
+          // میسج سینڈ ہونے کے بعد ہینڈل کریں
+          handleMessageSent(docId, customerData);
+        }
+      });
+    });
+}, 60000);
+
+function setCurrentDateTime() {
+  const now = new Date();
+  
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const currentDate = `${year}-${month}-${day}`;
+  
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const currentTime = `${hours}:${minutes}`;
+  
+  document.getElementById("date").value = currentDate;
+  document.getElementById("time").value = currentTime;
+}
+</script>
+</div>
+</body>
+</html>
